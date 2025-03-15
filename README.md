@@ -13,19 +13,19 @@ A TypeScript SDK for interacting with the Clnk URL shortener GraphQL API.
 ## Installation
 
 ```bash
-npm install @tryclnk/sdk
+npm install @clnk/sdk
 # or
-yarn add @tryclnk/sdk
+yarn add @clnk/sdk
 ```
 
 ## Quick Start
 
 ```typescript
-import { ClnkSDK } from '@tryclnk/sdk';
+import { ClnkSDK } from '@clnk/sdk';
 
 // Initialize the SDK
 const sdk = new ClnkSDK({
-  apiKey: 'optional-api-key', // Optional
+  apiKey: 'your-api-key',  // Required
   accessToken: 'your-access-token' // Optional, can be set later with sdk.setAccessToken()
 });
 
@@ -183,6 +183,12 @@ const apiKey = await sdk.generateApiKey();
 // Get current user info
 const currentUser = await sdk.getCurrentUser();
 ```
+
+## Important Notes
+
+1. API Key is required when initializing the SDK
+2. Access token can be provided during initialization or set later with `setAccessToken()`
+3. The SDK automatically manages the access token after login or token refresh
 
 ## License
 

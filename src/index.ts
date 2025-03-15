@@ -14,10 +14,18 @@ import type {
   ApiKey,
   Pagination,
 } from "./types/gql/graphql";
+import { QRCodeOptions } from "./types";
 
 export class ClnkSDK {
   private client: GraphQLClient;
   private accessToken?: string;
+  private rateLimitQueue: Promise<any> = Promise.resolve();
+  private rateLimit = {
+    maxRequests: 10, // Example limit
+    timeWindow: 60 * 1000, // 60 seconds
+    requestCount: 0,
+    resetTime: Date.now() + 60 * 1000,
+  };
 
   constructor(config: {
     apiUrl?: string;
@@ -38,6 +46,69 @@ export class ClnkSDK {
       headers["Authorization"] = `Bearer ${this.accessToken}`;
     }
     return headers;
+  }
+
+  // Helper method to handle GraphQL errors
+  private handleGraphQLError(error: any): never {
+    // Extract useful information from GraphQL errors
+    if (error?.errors?.length) {
+      const firstError = error.errors[0];
+
+      // Transform common errors into more specific ones
+      if (firstError.message.includes("Authentication")) {
+        throw new Error(
+          "Authentication failed: Please check your credentials or API key",
+        );
+      }
+
+      if (firstError.message.includes("Not authorized")) {
+        throw new Error(
+          "Authorization failed: You do not have permission to perform this action",
+        );
+      }
+
+      // Return the original error message if it's not a known type
+      throw new Error(`API Error: ${firstError.message}`);
+    }
+
+    // If it's not a GraphQL error, just rethrow
+    throw error;
+  }
+
+  private async executeWithRateLimit<T>(fn: () => Promise<T>): Promise<T> {
+    // Reset counter if we're past the reset time
+    if (Date.now() > this.rateLimit.resetTime) {
+      this.rateLimit.requestCount = 0;
+      this.rateLimit.resetTime = Date.now() + this.rateLimit.timeWindow;
+    }
+
+    // Check if we're at the limit
+    if (this.rateLimit.requestCount >= this.rateLimit.maxRequests) {
+      const waitTime = this.rateLimit.resetTime - Date.now();
+      if (waitTime > 0) {
+        // Wait until the rate limit resets
+        await new Promise((resolve) => setTimeout(resolve, waitTime));
+        // Reset after waiting
+        this.rateLimit.requestCount = 0;
+        this.rateLimit.resetTime = Date.now() + this.rateLimit.timeWindow;
+      }
+    }
+
+    // Use a queue to ensure requests are processed in order
+    return (this.rateLimitQueue = this.rateLimitQueue
+      .then(async () => {
+        this.rateLimit.requestCount++;
+        return fn();
+      })
+      .catch((error) => {
+        // If we get a rate limit error, wait and retry once
+        if (error?.message?.includes("rate limit")) {
+          return new Promise<T>((resolve) =>
+            setTimeout(() => resolve(fn()), 1000),
+          );
+        }
+        throw error;
+      }));
   }
 
   // Set access token
@@ -62,21 +133,25 @@ export class ClnkSDK {
       }
     `;
 
-    const executeGQL = this.client.executeGraphQL();
-    const response = await executeGQL<
-      { login: AuthData },
-      { input: LoginInput }
-    >({
-      query: LOGIN_MUTATION,
-      variables: { input },
-      headers: this.getHeaders(),
-    });
+    try {
+      const executeGQL = this.client.executeGraphQL();
+      const response = await executeGQL<
+        { login: AuthData },
+        { input: LoginInput }
+      >({
+        query: LOGIN_MUTATION,
+        variables: { input },
+        headers: this.getHeaders(),
+      });
 
-    if (response.login?.accessToken) {
-      this.setAccessToken(response.login.accessToken);
+      if (response.login?.accessToken) {
+        this.setAccessToken(response.login.accessToken);
+      }
+
+      return response.login;
+    } catch (error) {
+      return this.handleGraphQLError(error);
     }
-
-    return response.login;
   }
 
   async register(input: RegisterInput): Promise<RegisterData> {
@@ -93,17 +168,21 @@ export class ClnkSDK {
       }
     `;
 
-    const executeGQL = this.client.executeGraphQL();
-    const response = await executeGQL<
-      { register: RegisterData },
-      { input: RegisterInput }
-    >({
-      query: REGISTER_MUTATION,
-      variables: { input },
-      headers: this.getHeaders(),
-    });
+    try {
+      const executeGQL = this.client.executeGraphQL();
+      const response = await executeGQL<
+        { register: RegisterData },
+        { input: RegisterInput }
+      >({
+        query: REGISTER_MUTATION,
+        variables: { input },
+        headers: this.getHeaders(),
+      });
 
-    return response.register;
+      return response.register;
+    } catch (error) {
+      return this.handleGraphQLError(error);
+    }
   }
 
   async refreshToken(token: string): Promise<RefreshPayload> {
@@ -155,7 +234,8 @@ export class ClnkSDK {
 
   // URL shortening methods
   async createUrl(input: CreateUrlInput): Promise<Url> {
-    const CREATE_URL_MUTATION = `#graphql
+    return this.executeWithRateLimit(async () => {
+      const CREATE_URL_MUTATION = `#graphql
       mutation CreateUrl($input: CreateUrlInput!) {
         createUrl(input: $input) {
           id
@@ -169,17 +249,22 @@ export class ClnkSDK {
       }
     `;
 
-    const executeGQL = this.client.executeGraphQL();
-    const response = await executeGQL<
-      { createUrl: Url },
-      { input: CreateUrlInput }
-    >({
-      query: CREATE_URL_MUTATION,
-      variables: { input },
-      headers: this.getHeaders(),
-    });
+      try {
+        const executeGQL = this.client.executeGraphQL();
+        const response = await executeGQL<
+          { createUrl: Url },
+          { input: CreateUrlInput }
+        >({
+          query: CREATE_URL_MUTATION,
+          variables: { input },
+          headers: this.getHeaders(),
+        });
 
-    return response.createUrl;
+        return response.createUrl;
+      } catch (error) {
+        return this.handleGraphQLError(error);
+      }
+    });
   }
 
   async updateUrl(input: UpdateUrlInput): Promise<Url> {
@@ -365,9 +450,26 @@ export class ClnkSDK {
   }
 
   // QR code generation utility
-  generateQRCodeUrl(shortUrl: string, size: number = 300): string {
-    // Using a free QR code API service
-    return `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(shortUrl)}`;
+  generateQRCodeUrl(shortUrl: string, options: QRCodeOptions = {}): string {
+    const { size = 300, color, backgroundColor, format = "png" } = options;
+
+    // Base URL
+    let url = `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(shortUrl)}`;
+
+    // Add options if provided
+    if (color) {
+      url += `&color=${encodeURIComponent(color.replace("#", ""))}`;
+    }
+
+    if (backgroundColor) {
+      url += `&bgcolor=${encodeURIComponent(backgroundColor.replace("#", ""))}`;
+    }
+
+    if (format) {
+      url += `&format=${format}`;
+    }
+
+    return url;
   }
 }
 
