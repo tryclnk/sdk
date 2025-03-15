@@ -1,0 +1,46 @@
+{
+  "name": "@clnk/sdk",
+  "version": "0.0.1",
+  "description": "SDK for interacting with Clnk URL shortener GraphQL API",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "prepare": "npm run build",
+    "gen-gql-types": "npx graphql-codegen && echo 'make sure to fix the types in ./types/gql/gql.ts'"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tryclnk/sdk.git"
+  },
+  "keywords": [
+    "url-shortener",
+    "url",
+    "shortener",
+    "graphql",
+    "sdk",
+    "qrcode"
+  ],
+  "author": "miracleonyenma",
+  "license": "MIT",
+  "dependencies": {
+    "@untools/gql-client": "^1.0.0"
+  },
+  "devDependencies": {
+    "@graphql-codegen/cli": "^5.0.5",
+    "@types/jest": "^29.5.3",
+    "@types/node": "^18.15.11",
+    "jest": "^29.6.1",
+    "ts-jest": "^29.1.1",
+    "typescript": "^5.1.6"
+  },
+  "bugs": {
+    "url": "https://github.com/tryclnk/sdk/issues"
+  },
+  "homepage": "https://github.com/tryclnk/sdk#readme",
+  "files": [
+    "dist",
+    "README.md"
+  ]
+}
